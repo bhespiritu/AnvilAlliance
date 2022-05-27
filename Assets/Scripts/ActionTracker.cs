@@ -4,17 +4,23 @@ using System.IO;
 using Unity.Networking.Transport;
 using UnityEngine;
 
+using UnityEditor;
+using System;
+
 public class ActionTracker : MonoBehaviour
 {
     public PlayerManager playerManager;
     public NetworkManager networkManager;
 
-    List<ActionLogEntry> actions;
+    
+    List<ActionLogEntry> actions = new List<ActionLogEntry>();
 
     int numFactions;
 
     int[] factionIndices; //useless
 
+
+    [SerializeField]
     ActionLogEntry currentEntry;
 
     public void Start()
@@ -24,39 +30,57 @@ public class ActionTracker : MonoBehaviour
         numFactions = 2;
     }
 
-    public void collectActions()
+    public IEnumerator collectActions(Action callback = null)
     {
         currentEntry = new ActionLogEntry();
         currentEntry.tick = GameTime.currentTick;
-        currentEntry.actions = new Action[numFactions];
+        currentEntry.actions = new GameAction[numFactions];
 
-        //wait for input
-        for(int i = 0; i < numFactions; i++)
-        {
-            if(playerManager.players.ContainsKey(i))
-            {
-                Action a = playerManager.players[i].requestAction();
-                currentEntry.actions[i] = a;
-                a.PerformAction();
-            }
-        }
+        bool[] recieved = new bool[numFactions];
 
         networkManager.flushActionBuffer();
 
-        for (int i = 0; i < numFactions; i++)
+        bool allReceived;
+        do
         {
-            if (playerManager.players.ContainsKey(i))
+            //wait for input
+            for (int i = 0; i < numFactions; i++)
             {
-                Player player = playerManager.players[i];
-                if (player.GetType() == typeof(LocalPlayer))
+                if (playerManager.players.ContainsKey(i))
                 {
-                    networkManager.BroadcastAction(currentEntry.actions[i]);
+                    GameAction a = playerManager.players[i].requestAction();
+
+                    if (!recieved[i])
+                    {
+                        Debug.Log("Waiting for " + i);
+                        if (a != null)
+                        {
+                            currentEntry.actions[i] = a;
+                            a.PerformAction();
+                            recieved[i] = true;
+                            currentEntry.numActionsCollected++;
+                        }
+                    } 
+                    if (playerManager.players[i].GetType() == typeof(LocalPlayer) && recieved[i])
+                    {
+                        networkManager.BroadcastAction(a);
+                    }
                 }
             }
-            
-        }
 
 
+            allReceived = true;
+            for (int i = 0; i < numFactions; i++)
+            {
+                allReceived &= recieved[i];
+            }
+            if(!allReceived) yield return null;
+        } while (!allReceived);
+
+        
+        actions.Add(currentEntry);
+
+        callback?.Invoke();
     }
 
     public void SaveToFile()
@@ -78,7 +102,7 @@ public class ActionTracker : MonoBehaviour
             foreach (ActionLogEntry entry in actions)
             {
                 writer.WriteLine(entry.tick + "==");
-                foreach (Action action in entry.actions)
+                foreach (GameAction action in entry.actions)
                 {
                     writer.WriteLine(action.SerializeString());
                 }
@@ -90,24 +114,25 @@ public class ActionTracker : MonoBehaviour
 
 }
 
+[System.Serializable]
 public class ActionLogEntry
 {
     public int tick;
-    public Action[] actions;
+    public GameAction[] actions;
+    public int numActionsCollected;
 }
 
 
-
-public abstract class Action : IPacketData
+public abstract class GameAction : IPacketData
 {
-    public Action(DataStreamReader stream)
+    public GameAction(DataStreamReader stream)
     {
         Deserialize(ref stream);
     }
 
-    public Action() {}
+    public GameAction() {}
 
-    public static Action getActionFromID(char ID)
+    public static GameAction getActionFromID(char ID)
     {
         switch(ID)
         {
@@ -128,7 +153,7 @@ public abstract class Action : IPacketData
 
 }
 
-public class NoAction : Action
+public class NoAction : GameAction
 {
     public override void Deserialize(ref DataStreamReader stream)
     {
@@ -154,7 +179,7 @@ public class NoAction : Action
     }
 }
 
-public class PlaceAction : Action
+public class PlaceAction : GameAction
 {
     public int targetX, targetY;
 

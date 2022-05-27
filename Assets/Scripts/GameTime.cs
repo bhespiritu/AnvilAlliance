@@ -7,7 +7,7 @@ public class GameTime : MonoBehaviour
 
     private static GameTime INSTANCE;
 
-    public static int currentTick { get; private set; } = 0;
+    public static int currentTick { get; private set; } = -1;
 
     public static float timePerTick { get; private set; } =  1/20f;
 
@@ -21,10 +21,12 @@ public class GameTime : MonoBehaviour
 
     public bool enableDebugView = true;
 
-    public static bool isPaused = true;
+    public static bool isPaused = false;
 
     private ActionTracker actionTracker;
+    private NetworkManager networkManager;
 
+    private IEnumerator actionCoroutine;
 
     // Start is called before the first frame update
     void Start()
@@ -36,6 +38,7 @@ public class GameTime : MonoBehaviour
         else Destroy(gameObject);
 
         actionTracker = GetComponent<ActionTracker>();
+        networkManager = GetComponent<NetworkManager>();
 
         OnStart?.Invoke();
         OnTick += () => currentTick++;
@@ -49,17 +52,24 @@ public class GameTime : MonoBehaviour
         {
             accumTime += Time.deltaTime;
 
-            while (accumTime >= timePerTick)
+            if (accumTime >= timePerTick)
             {
-                OnTick.Invoke();
-                accumTime -= timePerTick;
+                if(networkManager.allAcknowledged())
+                    OnTick.Invoke();
+                accumTime %= timePerTick;
             }
         }
     }
 
     public void Tick()
     {
-        actionTracker.collectActions();
+        Debug.Log("TICK " + currentTick);
+        if(actionCoroutine != null)
+            StopCoroutine(actionCoroutine);
+        isPaused = true;
+        actionCoroutine = actionTracker.collectActions(() => isPaused = false);
+        StartCoroutine(actionCoroutine); 
+
     }
 
     private void OnGUI()

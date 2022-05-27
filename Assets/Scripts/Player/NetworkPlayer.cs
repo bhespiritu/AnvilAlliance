@@ -7,7 +7,7 @@ public class NetworkPlayer : Player
 {
     public NetworkManager netManager;
 
-    public override Action requestAction()
+    public override GameAction requestAction()
     {
         return netManager.requestAction(id);
     }

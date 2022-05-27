@@ -43,5 +43,5 @@ public abstract class Player
 {
     public int id;
 
-    public abstract Action requestAction();
+    public abstract GameAction requestAction();
 }

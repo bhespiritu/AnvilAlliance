@@ -16,7 +16,7 @@ public class NetworkManager : MonoBehaviour
 
     public NetworkConnection m_Connection;
 
-    Dictionary<int,Action> actionBuffer = new Dictionary<int, Action>(16);
+    Dictionary<int,GameAction> actionBuffer = new Dictionary<int, GameAction>(16);
 
     private bool isInitialized = false;
 
@@ -24,15 +24,17 @@ public class NetworkManager : MonoBehaviour
 
     public Dictionary<int, int> playerConnectionIndices = new Dictionary<int, int>();
 
+    public List<bool> hasAck { get; private set; } = new List<bool>();
 
 
-    public Action requestAction(int player)
+
+    public GameAction requestAction(int player)
     {
         if(actionBuffer.ContainsKey(player))
         {
             return actionBuffer[player];
         }
-        return new NoAction();
+        return null;
     }
 
     public void flushActionBuffer()
@@ -40,18 +42,24 @@ public class NetworkManager : MonoBehaviour
         actionBuffer.Clear();
     }
 
-    public void BroadcastAction(Action a)
+    public void BroadcastAction(GameAction a)
     {
-        foreach(NetworkConnection connection in m_Connections)
+        for(int i = 0; i < m_Connections.Length; i++)
         {
-            m_Driver.BeginSend(connection, out var writer);
-            Packet p = new Packet
+            if (!hasAck[i])
             {
-                packetID = 0xBA,
-                packetData = a
-            };
-            p.Serialize(ref writer);
-            m_Driver.EndSend(writer);
+                Debug.Log("Broadcasting to " + i + " " + a.GetType());
+                var connection = m_Connections[i];
+                m_Driver.BeginSend(connection, out var writer);
+                Packet p = new Packet
+                {
+                    packetID = 0xBA,
+                    packetData = a,
+                    tick = GameTime.currentTick
+                };
+                p.Serialize(ref writer);
+                m_Driver.EndSend(writer);
+            }
         }
     }
 
@@ -73,7 +81,7 @@ public class NetworkManager : MonoBehaviour
                 Debug.Log("Failed to bind to port 9000");
             else m_Driver.Listen();
 
-            playerManager.players[0] = new LocalPlayer();
+            playerManager.players[0] = new LocalPlayer { id = 0 };
         } else
         {
             m_Driver = NetworkDriver.Create();
@@ -81,8 +89,16 @@ public class NetworkManager : MonoBehaviour
             endpoint.Port = 9000;
             m_Connections.Add(m_Driver.Connect(endpoint));
         }
-            
 
+        GameTime.OnTick += () => Tick();
+    }
+
+    void Tick()
+    {
+        for(int i = 0; i < hasAck.Count; i++)
+        {
+            hasAck[i] = false;
+        }
     }
 
     public void OnDestroy()
@@ -112,6 +128,11 @@ public class NetworkManager : MonoBehaviour
             {
                 m_Connections.Add(c);
                 Debug.Log("Accepted a connection");
+                hasAck.Add(false);
+
+                
+                playerManager.players[1] = new NetworkPlayer { id = 1, netManager = this };
+
 
                 playerConnectionIndices[0] = 1;
 
@@ -147,10 +168,12 @@ public class NetworkManager : MonoBehaviour
                 {
                     if (cmd == NetworkEvent.Type.Data)
                     {
-                        Debug.Log(stream.IsCreated);
-                        short s = stream.ReadShort();
-                        Debug.Log(s);
-                        short packetID = s;
+                        short packetID = stream.ReadShort();
+
+                        int tick = stream.ReadInt();
+
+                        Debug.Log(stream.IsCreated + " " + packetID + " " + tick);
+
                         switch (packetID)
                         {
                             case 0xAB:
@@ -179,12 +202,38 @@ public class NetworkManager : MonoBehaviour
                                 break;
                             case 0xBA:
                                 {
-                                    char actionID = (char)stream.ReadShort();
-                                    Action a = Action.getActionFromID(actionID);
-                                    a.Deserialize(ref stream);
-                                    actionBuffer[playerConnectionIndices[i]] = a;
+                                    if(tick == GameTime.currentTick)
+                                    {
+                                        char actionID = (char)stream.ReadShort();
+                                        GameAction a = GameAction.getActionFromID(actionID);
+                                        a.Deserialize(ref stream);
 
-                                    Debug.Log("Got Action " + a + " for Player " + playerConnectionIndices[i]);
+                                        actionBuffer[playerConnectionIndices[i]] = a;
+
+                                        Debug.Log("Got Action " + a + " for Player " + playerConnectionIndices[i]);
+
+
+                                        Packet ack = new Packet
+                                        {
+                                            tick = tick,
+                                            packetID = 0x44,
+                                            packetData = new EmptyPacketData()
+                                        };
+                                        m_Driver.BeginSend(m_Connections[i], out var writer);
+                                        ack.Serialize(ref writer);
+                                        m_Driver.EndSend(writer);
+                                    }
+                                    
+                                }
+                                break;
+                            case 0x44:
+                                {
+                                    if(tick == GameTime.currentTick)
+                                    {
+                                        Debug.Log( i + " acknowledged for tick " + tick);
+                                        hasAck[i] = true;
+                                    }
+                                    
                                 }
                                 break;
                             default:
@@ -193,7 +242,7 @@ public class NetworkManager : MonoBehaviour
                     }
                     else if (cmd == NetworkEvent.Type.Connect)
                     {
-
+                        hasAck.Add(false);
                     }
                     else if (cmd == NetworkEvent.Type.Disconnect)
                     {
@@ -202,16 +251,14 @@ public class NetworkManager : MonoBehaviour
                     }
                 }
             }
-
-            
-            
-
-
-
-
-            
-
         }
+    }
+
+    public bool allAcknowledged()
+    {
+        bool allTrue = true;
+        foreach (bool b in hasAck) allTrue &= b;
+        return allTrue;
     }
 
     void OnGUI()
@@ -239,12 +286,14 @@ public class NetworkManager : MonoBehaviour
     private struct Packet
     {
         public short packetID;
+        public int tick;
 
         public IPacketData packetData;
 
         public void Serialize(ref DataStreamWriter writer)
         {
             writer.WriteShort(packetID);
+            writer.WriteInt(tick);
             packetData.Serialize(ref writer);
         }
 
@@ -257,6 +306,19 @@ public interface IPacketData
 {
     public abstract void Serialize(ref DataStreamWriter writer);
     public abstract void Deserialize(ref DataStreamReader reader);
+}
+
+public struct EmptyPacketData : IPacketData
+{
+    public void Deserialize(ref DataStreamReader reader)
+    {
+        
+    }
+
+    public void Serialize(ref DataStreamWriter writer)
+    {
+        
+    }
 }
 
 public struct RegisterPacketData : IPacketData
