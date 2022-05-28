@@ -11,7 +11,7 @@ public class Unit : MonoBehaviour
     public GameObject target;
 
     public float moveSpeed = 5;
-    public float targetBearing = 0;
+    public float targetBearing = 45;
 
     public event GameTime.TimeEvent OnUnitTick;
 
@@ -45,6 +45,6 @@ public class Unit : MonoBehaviour
         float timeSinceLastTick = (Time.time - GameTime.gameTime);
         Vector2 interPos = truePosition + dir*(timeSinceLastTick/GameTime.timePerTick)*0;
 
-        transform.position = new Vector3(interPos.x, 0, interPos.y);
+        transform.position = new Vector3(interPos.x, 0.25f, interPos.y);
     }
 }

@@ -15,8 +15,8 @@ public struct FixedFloat
 
     public FixedFloat(int val)
     {
-        data = val;
         val *= scaleFactor;
+        data = val;
     }
 
     public FixedFloat(double val)
