@@ -48,10 +48,12 @@ public class ActionTracker : MonoBehaviour
             {
                 if (playerManager.players.ContainsKey(i))
                 {
-                    GameAction a = playerManager.players[i].requestAction();
+                    GameAction a;
 
                     if (!recieved[i])
                     {
+                        a = playerManager.players[i].requestAction();
+
                         Debug.Log("Waiting for " + i);
                         if (a != null)
                         {
@@ -63,7 +65,9 @@ public class ActionTracker : MonoBehaviour
                     } 
                     if (playerManager.players[i].GetType() == typeof(LocalPlayer) && recieved[i])
                     {
+                        a = currentEntry.actions[i];
                         networkManager.BroadcastAction(a);
+                        
                     }
                 }
             }
