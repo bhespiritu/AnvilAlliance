@@ -6,44 +6,130 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 
+using Unity.Mathematics;
+
 public class FlowFieldManager : MonoBehaviour
 {
 
+    public Vector3[] dirLUT =
+    {
+        Vector3.down, Vector3.forward, (Vector3.forward + Vector3.right).normalized, Vector3.right, (Vector3.back + Vector3.right).normalized, Vector3.back, (Vector3.back + Vector3.left).normalized, Vector3.left, (Vector3.forward + Vector3.left).normalized
+    };
+
     public static readonly int sectorSize = 64;
+
+    public int targetX, targetY;
+
+    JobHandle debugHandle;
+
+    NativeArray<Direction> direction;
+    NativeArray<int> cost, integ;
+    NativeList<int2> stack;
+
+    private bool scheduled = false;
+    private bool isDone = false;
 
     // Start is called before the first frame update
     void Start()
     {
-        var input = new NativeArray<int>(10, Allocator.Persistent);
-        var output = new NativeArray<Direction>(1, Allocator.Persistent);
-        for (int i = 0; i < input.Length; i++)
-            input[i] = i;
+        
 
-        var job = new DirectionJob
+        cost = new NativeArray<int>(64*64, Allocator.Persistent);
+        integ = new NativeArray<int>(64*64, Allocator.Persistent);
+        stack = new NativeList<int2>(10, Allocator.Persistent);
+
+        direction = new NativeArray<Direction>(64*64, Allocator.Persistent);
+
+        stack.Add(new int2(targetX,targetY));
+
+        for(int x = 0; x < sectorSize; x++)
         {
-            integrationGrid = input,
-            directionGrid = output
-        };
-        job.Schedule(output.Length, 1).Complete();
+            for(int y = 0; y < sectorSize; y++)
+            {
+                if(!(x == targetX && y == targetY))
+                {
+                    integ[y*sectorSize + x] = 255;
+                }
+                cost[y*sectorSize + x] = 1;
+            }
+        }
 
-        Debug.Log("The result of the sum is: " + output[0]);
-        input.Dispose();
-        output.Dispose();
+        cost[5*sectorSize + 18] = 40;
+        cost[6*sectorSize + 18] = 40;
+        cost[5*sectorSize + 19] = 40;
+        cost[6*sectorSize + 19] = 40;
+
+        var integrationJob = new IntegrateJob
+        {
+            costGrid = cost,
+            stack = stack,
+            integrationGrid = integ
+        };
+
+        var directionJob = new DirectionJob
+        {
+            integrationGrid = integ,
+            directionGrid = direction
+        };
+
+        var integHandle = integrationJob.Schedule();
+        var directionHandle = directionJob.Schedule(64*64, 1,integHandle);
+
+        debugHandle = directionHandle;
+
+        scheduled = true;
     }
 
-    // Update is called once per frame
-    void Update()
+    private void OnDrawGizmosSelected()
     {
         
+        if(isDone)
+        {
+            for(int x = 0; x < sectorSize; x++)
+            {
+                for(int y = 0; y < sectorSize; y++)
+                {
+                    Gizmos.color = Color.white;
+                    int i = y*sectorSize + x;
+                    if (x == targetX && y == targetY)
+                        Gizmos.color = Color.blue;
+                    Gizmos.DrawRay(new Vector3(x, 1, y), dirLUT[(int) direction[i]]*0.5f);
+                    Gizmos.color = Color.red;
+                    Gizmos.DrawRay(new Vector3(x, 1, y), new Vector3(0,10*integ[i]/255f,0));
+                }
+            }
+        }
     }
 
-    [BurstCompile(CompileSynchronously = true)]
+    private void OnDestroy()
+    {
+        direction.Dispose();
+        cost.Dispose();
+        stack.Dispose();
+        integ.Dispose();
+    }
+
+
+    void Update()
+    {
+        if (scheduled)
+        {
+            if (debugHandle.IsCompleted)
+            {
+                debugHandle.Complete();
+                isDone = true;
+                scheduled = false;
+            }
+        }
+    }
+
+    [BurstCompile]
     private struct IntegrateJob : IJob
     {
         [ReadOnly]
         public NativeArray<int> costGrid;
 
-        public NativeArray<int> stack;
+        public NativeList<int2> stack;
 
         //must be filled with high default value except for the goal gridspaces.
         public NativeArray<int> integrationGrid;
@@ -51,13 +137,13 @@ public class FlowFieldManager : MonoBehaviour
         //TODO: Add in walls and shit
         public void Execute()
         {
-            int stackPointer = 0;
-            while (stackPointer >= 0)
+            while (stack.Length > 0)
             {
-                int i = stack[stackPointer--];
+                int2 i = stack[0];
+                stack.RemoveAt(0);
 
-                int x = i % sectorSize;
-                int y = i / sectorSize;
+                int x = i.x;
+                int y = i.y;
 
                 int integCenter = integrationGrid[I(x, y)];
 
@@ -70,7 +156,7 @@ public class FlowFieldManager : MonoBehaviour
                     {
                         integrationGrid[I(x, y-1)] = integCenter + costNorth;
 
-                        stack[++stackPointer] = I(x, y-1);
+                        stack.Add(new int2(x, y-1));
                     }
                 }
 
@@ -83,7 +169,7 @@ public class FlowFieldManager : MonoBehaviour
                     {
                         integrationGrid[I(x+1, y)] = integCenter + costEast;
 
-                        stack[++stackPointer] = I(x+1, y);
+                        stack.Add(new int2(x+1, y));
                     }
                 }
 
@@ -96,7 +182,7 @@ public class FlowFieldManager : MonoBehaviour
                     {
                         integrationGrid[I(x, y+1)] = integCenter + costSouth;
 
-                        stack[++stackPointer] = I(x, y+1);
+                        stack.Add(new int2(x, y+1));
                     }
                 }
 
@@ -108,8 +194,7 @@ public class FlowFieldManager : MonoBehaviour
                     if (integCenter + costWest < integWest)
                     {
                         integrationGrid[I(x-1, y)] = integCenter + costWest;
-
-                        stack[++stackPointer] = I(x-1, y);
+                        stack.Add(new int2(x-1, y));
                     }
                 }
             }
@@ -121,7 +206,7 @@ public class FlowFieldManager : MonoBehaviour
         }
     }
 
-    [BurstCompile(CompileSynchronously = true)]
+    [BurstCompile]
     private struct DirectionJob : IJobParallelFor
     {
         [ReadOnly]
