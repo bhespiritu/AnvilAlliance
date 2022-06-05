@@ -27,11 +27,11 @@ public class ActionTracker : MonoBehaviour
     {
         networkManager = GetComponent<NetworkManager>();
         playerManager = GetComponent<PlayerManager>();
-        numFactions = 2;
     }
 
     public IEnumerator collectActions(Action callback = null)
     {
+        numFactions = playerManager.players.Count;
         currentEntry = new ActionLogEntry();
         currentEntry.tick = GameTime.currentTick;
         currentEntry.actions = new GameAction[numFactions];

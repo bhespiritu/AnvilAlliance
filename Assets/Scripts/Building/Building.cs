@@ -25,6 +25,7 @@ public class Building : MonoBehaviour
     {
         yield return 0;
         GameTime.OnTick += OnBuildingTick;
+
     }
 
     private void OnDestroy()

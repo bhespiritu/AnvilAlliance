@@ -21,7 +21,7 @@ public class GameTime : MonoBehaviour
 
     public bool enableDebugView = true;
 
-    public static bool isPaused = false;
+    public static bool isPaused = true;
 
     private ActionTracker actionTracker;
     private NetworkManager networkManager;

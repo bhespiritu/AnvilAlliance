@@ -21,6 +21,7 @@ public class NetworkManager : MonoBehaviour
     private bool isInitialized = false;
 
     private bool debugClient = false;
+    private bool isOnline = true;
 
     public Dictionary<int, int> playerConnectionIndices = new Dictionary<int, int>();
 
@@ -72,23 +73,32 @@ public class NetworkManager : MonoBehaviour
     void Init()
     {
         isInitialized = true;
-        if (!debugClient)
+        GameTime.isPaused = false;
+        if (isOnline)
         {
-            m_Driver = NetworkDriver.Create();
-            var endpoint = NetworkEndPoint.AnyIpv4; // The local address to which the client will connect to is 127.0.0.1
-            endpoint.Port = 9000;
-            if (m_Driver.Bind(endpoint) != 0)
-                Debug.Log("Failed to bind to port 9000");
-            else m_Driver.Listen();
+            if (!debugClient)
+            {
+                m_Driver = NetworkDriver.Create();
+                var endpoint = NetworkEndPoint.AnyIpv4; // The local address to which the client will connect to is 127.0.0.1
+                endpoint.Port = 9000;
+                if (m_Driver.Bind(endpoint) != 0)
+                    Debug.Log("Failed to bind to port 9000");
+                else m_Driver.Listen();
 
-            playerManager.players[0] = new LocalPlayer { id = 0 };
+                playerManager.players[0] = new LocalPlayer { id = 0 };
+            }
+            else
+            {
+                m_Driver = NetworkDriver.Create();
+                var endpoint = NetworkEndPoint.LoopbackIpv4;
+                endpoint.Port = 9000;
+                m_Connections.Add(m_Driver.Connect(endpoint));
+            }
         } else
         {
-            m_Driver = NetworkDriver.Create();
-            var endpoint = NetworkEndPoint.LoopbackIpv4; 
-            endpoint.Port = 9000;
-            m_Connections.Add(m_Driver.Connect(endpoint));
+            playerManager.players[0] = new LocalPlayer { id = 0 };
         }
+
 
         GameTime.OnTick += () => Tick();
     }
@@ -109,7 +119,7 @@ public class NetworkManager : MonoBehaviour
 
     void Update()
     {
-        if (isInitialized)
+        if (isInitialized && isOnline)
         {
             m_Driver.ScheduleUpdate().Complete();
 
@@ -276,6 +286,12 @@ public class NetworkManager : MonoBehaviour
             if (GUILayout.Button("Connect Game"))
             {
                 debugClient = true;
+                Init();
+            }
+            if (GUILayout.Button("Local Game"))
+            {
+                debugClient = false;
+                isOnline = false;
                 Init();
             }
             GUILayout.EndArea();
